@@ -206,80 +206,22 @@
             </xml>
         `;
         
-        const workspace = Blockly.inject(blocklyDiv, {
-            toolbox: toolboxXml,
-            zoom: {
-                controls: true,
-                wheel: true,
-                startScale: 1.0,
-                maxScale: 3,
-                minScale: 0.3,
-                scaleSpeed: 1.2
-            },
-            grid: {
-                spacing: 20,
-                length: 3,
-                colour: '#ccc',
-                snap: true
-            },
-            trashcan: true
-        });
-        
-        // Set up event listeners for the workspace to track blocks
-        workspace.addChangeListener(function(event) {
-            // When blocks are created by dragging from toolbox
-            if (event.type === Blockly.Events.BLOCK_CREATE) {
-                // Add newly created blocks to our blockList
-                event.ids.forEach(id => {
-                    const block = workspace.getBlockById(id);
-                    if (block && !blockList.includes(block)) {
-                        blockList.push(block);
-                    }
-                });
-                updateBlockNumbers();
-            }
-            
-            // When blocks are deleted
-            if (event.type === Blockly.Events.BLOCK_DELETE) {
-                // Remove deleted blocks from our blockList
-                blockList = blockList.filter(block => {
-                    return workspace.getBlockById(block.id) !== null;
-                });
-                updateBlockNumbers();
-            }
-            
-            // When blocks are connected or disconnected
-            if (event.type === Blockly.Events.BLOCK_MOVE) {
-                if (event.newParentId !== undefined || event.oldParentId !== undefined) {
-                    // This is a connection/disconnection event
-                    updateBlockNumbers();
-                }
-            }
-        });
-        
-        // Array to store created blocks
+        let workspace;
+        let workspaceReference;
         let blockList = [];
-        
-        // Current selected block index
+        let blockChains = new Map();
         let selectedBlockIndex = -1;
-        
-        // Toolbox state
         let isToolboxOpen = false;
         let inCategoryView = true;
         let categoryList = Object.keys(toolboxDef);
         let selectedCategoryIndex = 0;
         let selectedBlockInCategoryIndex = 0;
         let currentCategoryBlocks = [];
-        
-        // Connection mode state
         let isConnectionMode = false;
         let connectionPoints = [];
         let selectedConnectionIndex = -1;
         let sourceBlock = null;
         let sourceConnection = null;
-        
-        // Block numbering system
-        let blockChains = new Map(); // Map to track block chains for numbering
         
         // Status display function
         function showStatus(message, duration = 5000) {
@@ -968,17 +910,26 @@
         
         // Add and update block numbers
         function updateBlockNumbers() {
+            console.log("updateBlockNumbers called, blocks in workspace:", blockList.length);
+            
             // Clear existing block chain tracking
             blockChains.clear();
+            
+            // Ensure the blockList is up to date with the current workspace
+            blockList = workspace.getAllBlocks();
+            console.log("Updated blockList from workspace, count:", blockList.length);
+            
+            // Clear all existing labels from all blocks
+            blockList.forEach(block => {
+                removeBlockLabel(block);
+                removeStackCounterLabel(block);
+            });
             
             // Find all top-level blocks (blocks without previous connections or parent)
             const topLevelBlocks = [];
             
             // First pass - identify top-level blocks and add them to our tracking
             blockList.forEach(block => {
-                // Remove any existing labels
-                removeBlockLabel(block);
-                
                 // A block is top-level if it has no parent OR if it's the top of a stack
                 // (meaning it doesn't have a connected previous connection)
                 const isTopOfStack = !block.previousConnection || 
@@ -989,59 +940,64 @@
                 }
             });
             
+            console.log("Top level blocks found:", topLevelBlocks.length);
+            
             // Second pass - for each top block, traverse down the chain and number sequentially
             topLevelBlocks.forEach(topBlock => {
-                let currentBlock = topBlock;
-                let blockNumber = 1;
+                // First count all blocks in this stack
+                const stackBlocks = countBlocksInStack(topBlock);
+                const stackCount = stackBlocks.length;
                 
-                // Follow the chain through connections and number each block
-                while (currentBlock) {
-                    // Add number label to current block
-                    addBlockLabel(currentBlock, blockNumber);
-                    blockChains.set(currentBlock.id, blockNumber);
+                console.log(`Stack with block ${topBlock.id} has ${stackCount} blocks`);
+                
+                // Add the stack counter to the top block with the total count
+                addStackCounterLabel(topBlock, stackCount);
+                
+                // Now number each block in the stack sequentially
+                let blockNumber = 1;
+                stackBlocks.forEach(block => {
+                    addBlockLabel(block, blockNumber);
+                    blockChains.set(block.id, blockNumber);
+                    blockNumber++;
+                });
+            });
+        }
+        
+        // Helper function to count all blocks in a stack
+        function countBlocksInStack(topBlock) {
+            const stackBlocks = [];
+            let currentBlock = topBlock;
+            
+            // Traverse the stack and collect all blocks
+            while (currentBlock) {
+                stackBlocks.push(currentBlock);
+                
+                // Find next block in the chain
+                let nextBlock = null;
+                
+                // Check if this block has a next connection that's connected
+                if (currentBlock.nextConnection && currentBlock.nextConnection.isConnected()) {
+                    nextBlock = currentBlock.nextConnection.targetBlock();
+                } else {
+                    // Look for blocks that are connected to this one via inputs
+                    const connectedBlocks = currentBlock.getChildren(false);
                     
-                    // Try to find the next block in the chain
-                    let nextBlock = null;
+                    // Filter out blocks that are connected via next/previous
+                    const inputConnectedBlock = connectedBlocks.find(child => {
+                        return !child.previousConnection || 
+                               !child.previousConnection.isConnected() ||
+                               child.previousConnection.targetBlock() !== currentBlock;
+                    });
                     
-                    // Check if this block has a next connection that's connected
-                    if (currentBlock.nextConnection && currentBlock.nextConnection.isConnected()) {
-                        nextBlock = currentBlock.nextConnection.targetBlock();
-                    } 
-                    // If no next connection, look at output connection (for value blocks)
-                    else if (currentBlock.outputConnection && currentBlock.outputConnection.isConnected()) {
-                        // For output connections, we don't want to follow to parent block
-                        // but rather to any child blocks of this block through inputs
-                        const parentBlock = currentBlock.outputConnection.targetBlock();
-                        // We don't count the parent in the chain
-                    }
-                    
-                    // If we found a next block in the chain, increment number and continue
-                    if (nextBlock) {
-                        blockNumber++;
-                        currentBlock = nextBlock;
-                    } else {
-                        // Look for blocks that are connected to this one via inputs
-                        const connectedBlocks = currentBlock.getChildren(false);
-                        
-                        // Filter out blocks that are connected via next/previous 
-                        // (those are handled by the main chain traversal)
-                        const inputConnectedBlock = connectedBlocks.find(child => {
-                            // Not connected via previous connection
-                            return !child.previousConnection || 
-                                   !child.previousConnection.isConnected() ||
-                                   child.previousConnection.targetBlock() !== currentBlock;
-                        });
-                        
-                        if (inputConnectedBlock) {
-                            blockNumber++;
-                            currentBlock = inputConnectedBlock;
-                        } else {
-                            // End of chain, no more connected blocks
-                            break;
-                        }
+                    if (inputConnectedBlock) {
+                        nextBlock = inputConnectedBlock;
                     }
                 }
-            });
+                
+                currentBlock = nextBlock;
+            }
+            
+            return stackBlocks;
         }
         
         // Add a number label to a block
@@ -1083,11 +1039,101 @@
             block.blockNumberLabel = labelGroup;
         }
         
+        // Add a stack counter label to the top block showing total blocks in stack
+        function addStackCounterLabel(block, count) {
+            // Remove any existing stack counter
+            removeStackCounterLabel(block);
+            
+            console.log(`Adding stack counter to block ${block.id} with count: ${count}`);
+            
+            try {
+                // Get block dimensions to center the counter
+                const blockWidth = block.width || 100; // Default if width not available
+                const counterWidth = Math.max(100, 50 + (count.toString().length * 20)); // Extra wide for better visibility
+                const xPosition = (blockWidth / 2) - (counterWidth / 2);
+                
+                // Create new stack counter element - position it at the top center of the block
+                const counterGroup = Blockly.utils.dom.createSvgElement('g', {
+                    'class': 'blocklyStackCounterLabel',
+                    'transform': `translate(${xPosition}, -45)`  // Position further above the block
+                }, block.getSvgRoot());
+                
+                // Outer glow for better visibility
+                Blockly.utils.dom.createSvgElement('rect', {
+                    'x': 0,
+                    'y': 0,
+                    'width': counterWidth,
+                    'height': 36,
+                    'rx': 18,
+                    'ry': 18,
+                    'fill': 'none',
+                    'stroke': '#ffffff',
+                    'stroke-width': 4,
+                    'filter': 'blur(3px)'
+                }, counterGroup);
+                
+                // Drop shadow
+                Blockly.utils.dom.createSvgElement('rect', {
+                    'x': 4,
+                    'y': 4,
+                    'width': counterWidth - 8,
+                    'height': 36 - 8,
+                    'rx': 18 - 4,
+                    'ry': 18 - 4,
+                    'fill': '#000000',
+                    'opacity': 0.3,
+                    'filter': 'blur(3px)'
+                }, counterGroup);
+                
+                // Background with rounded corners
+                Blockly.utils.dom.createSvgElement('rect', {
+                    'x': 0,
+                    'y': 0,
+                    'width': counterWidth,
+                    'height': 36,
+                    'rx': 18,
+                    'ry': 18,
+                    'fill': '#ff4081',  // Brighter pink
+                    'stroke': '#c2185b', // Darker pink border
+                    'stroke-width': 2.5
+                }, counterGroup);
+                
+                // Counter text
+                const text = Blockly.utils.dom.createSvgElement('text', {
+                    'x': counterWidth / 2,
+                    'y': 22,
+                    'text-anchor': 'middle',
+                    'dominant-baseline': 'middle',
+                    'font-size': '16pt',
+                    'font-weight': 'bold',
+                    'fill': '#ffffff',  // White text
+                    'style': 'text-shadow: 1px 1px 2px rgba(0,0,0,0.5)'  // Text shadow
+                }, counterGroup);
+                
+                text.textContent = `${count} ${count === 1 ? 'Block' : 'Blocks'}`;
+                
+                // Store a reference to the counter element on the block
+                block.stackCounterLabel = counterGroup;
+                
+                console.log("Stack counter added successfully");
+            } catch (e) {
+                console.error("Error adding stack counter:", e);
+            }
+        }
+        
         // Remove number label from a block
         function removeBlockLabel(block) {
             if (block.blockNumberLabel) {
                 Blockly.utils.dom.removeNode(block.blockNumberLabel);
                 block.blockNumberLabel = null;
+            }
+        }
+        
+        // Remove stack counter label from a block
+        function removeStackCounterLabel(block) {
+            if (block.stackCounterLabel) {
+                Blockly.utils.dom.removeNode(block.stackCounterLabel);
+                block.stackCounterLabel = null;
             }
         }
         
@@ -1111,8 +1157,211 @@
             Blockly.svgResize(workspace);
         }
         
-        window.addEventListener('resize', onResize, false);
-        onResize();
+        // Initialization function
+        function initBlockly() {
+            // Create the Blockly workspace
+            workspace = Blockly.inject(blocklyDiv, {
+                toolbox: toolboxXml,
+                zoom: {
+                    controls: true,
+                    wheel: true,
+                    startScale: 1.0,
+                    maxScale: 3,
+                    minScale: 0.3,
+                    scaleSpeed: 1.2
+                },
+                grid: {
+                    spacing: 20,
+                    length: 3,
+                    colour: '#ccc',
+                    snap: true
+                },
+                trashcan: true
+            });
+            
+            // Setup event listeners for workspace changes
+            setupEventListeners();
+            
+            // Resize the workspace to fit the window
+            window.addEventListener('resize', onResize, false);
+            onResize();
+        }
+        
+        // Set up event listeners for the Blockly workspace
+        function setupEventListeners() {
+            // Listen for workspace events
+            workspace.addChangeListener(function(event) {
+                // When blocks are created
+                if (event.type === Blockly.Events.BLOCK_CREATE) {
+                    console.log('Block created:', event.ids);
+                    
+                    // Add newly created blocks to our blockList
+                    if (event.ids) {
+                        event.ids.forEach(id => {
+                            const block = workspace.getBlockById(id);
+                            if (block && !blockList.includes(block)) {
+                                blockList.push(block);
+                            }
+                        });
+                    }
+                    updateBlockNumbers();
+                }
+                // When blocks are deleted
+                else if (event.type === Blockly.Events.BLOCK_DELETE) {
+                    console.log('Block deleted:', event.ids);
+                    
+                    // Update our block list to match workspace reality
+                    blockList = workspace.getAllBlocks();
+                    
+                    // Force refresh with a delay to ensure workspace is updated
+                    setTimeout(function() {
+                        // Double check our block list
+                        blockList = workspace.getAllBlocks();
+                        console.log(`After deletion: ${blockList.length} blocks remain in workspace`);
+                        updateBlockNumbers();
+                    }, 50);
+                }
+                // When blocks are moved
+                else if (event.type === Blockly.Events.BLOCK_MOVE) {
+                    console.log('Block moved');
+                    
+                    // Block connections/disconnections
+                    if (event.newParentId !== undefined || event.oldParentId !== undefined) {
+                        console.log('Block connected or disconnected');
+                        
+                        // Update with delay to allow connection to complete
+                        setTimeout(function() {
+                            updateBlockNumbers();
+                        }, 50);
+                    }
+                }
+                // When blocks are changed (field edit, etc)
+                else if (event.type === Blockly.Events.BLOCK_CHANGE) {
+                    updateBlockNumbers();
+                }
+            });
+            
+            // Set up keyboard navigation event listener
+            document.addEventListener('keydown', handleKeyboardNavigation);
+        }
+        
+        // Handle keyboard navigation
+        function handleKeyboardNavigation(e) {
+            // Handle connection mode if active
+            if (isConnectionMode) {
+                handleConnectionNavigation(e);
+                return;
+            }
+            
+            // Handle toolbox navigation if toolbox is open
+            if (isToolboxOpen) {
+                handleToolboxNavigation(e);
+                return;
+            }
+            
+            // Number keys 1-6 select blocks directly
+            if (e.key >= '1' && e.key <= '6') {
+                const index = parseInt(e.key) - 1;
+                if (index < blockList.length) {
+                    selectBlock(index);
+                    e.preventDefault();
+                }
+                return;
+            }
+            
+            // T key opens the toolbox
+            if (e.key === 't' || e.key === 'T') {
+                openToolbox();
+                e.preventDefault();
+                return;
+            }
+            
+            // C key enters connection mode
+            if (e.key === 'c' || e.key === 'C') {
+                if (selectedBlockIndex >= 0) {
+                    enterConnectionMode();
+                    e.preventDefault();
+                } else {
+                    showStatus('Please select a block first before entering connection mode');
+                }
+                return;
+            }
+            
+            // Only proceed with other keys if a block is selected
+            if (selectedBlockIndex < 0) return;
+            
+            switch (e.key) {
+                case 'ArrowLeft':
+                    // Find the nearest block to the left
+                    navigateDirection('left');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowRight':
+                    // Find the nearest block to the right
+                    navigateDirection('right');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowUp':
+                    // Find the nearest block above
+                    navigateDirection('up');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowDown':
+                    // Find the nearest block below
+                    navigateDirection('down');
+                    e.preventDefault();
+                    break;
+                    
+                case 'Delete':
+                case 'Backspace':
+                    // Delete the selected block
+                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                        const blockToDelete = blockList[selectedBlockIndex];
+                        
+                        // Remove from our list
+                        blockList.splice(selectedBlockIndex, 1);
+                        
+                        // If we deleted the last block, select the new last block
+                        if (selectedBlockIndex >= blockList.length) {
+                            selectedBlockIndex = blockList.length - 1;
+                        }
+                        
+                        // Delete the block
+                        blockToDelete.dispose();
+                        
+                        // Select the next block if available
+                        if (blockList.length > 0) {
+                            selectBlock(selectedBlockIndex);
+                        } else {
+                            selectedBlockIndex = -1;
+                            updateCurrentBlock();
+                        }
+                        
+                        // Update block numbers after deletion
+                        updateBlockNumbers();
+                        
+                        showStatus('Block deleted');
+                        e.preventDefault();
+                    }
+                    break;
+                    
+                case 'Escape':
+                    // Deselect all blocks
+                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                        blockList[selectedBlockIndex].unselect();
+                        selectedBlockIndex = -1;
+                        updateCurrentBlock();
+                        showStatus('Navigation mode exited');
+                        e.preventDefault();
+                    }
+                    break;
+            }
+        }
+        
+        initBlockly();
     </script>
 </body>
 </html>
