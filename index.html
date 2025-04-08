@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Blockly with Simple Keyboard Navigation</title>
+    <!-- Load Blockly from CDN -->
+    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #blocklyArea {
+            height: 480px;
+            width: 100%;
+            background-color: #f9f9f9;
+            position: relative;
+        }
+        #blocklyDiv {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #3b78e7;
+        }
+        #instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-left: 4px solid #4285f4;
+        }
+        #status {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #e8f0fe;
+            display: none;
+        }
+        .shortcut {
+            display: inline-block;
+            background-color: #eee;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            padding: 2px 5px;
+            margin: 2px;
+            font-family: monospace;
+        }
+        #currentBlock {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #d9edf7;
+            border-left: 4px solid #31708f;
+            display: none;
+        }
+        #toolboxPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 250px;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            padding: 10px;
+            display: none;
+            z-index: 1000;
+        }
+        #toolboxPanel h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .toolbox-category {
+            padding: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .toolbox-category:hover, .toolbox-category.selected {
+            background-color: #f0f0f0;
+        }
+        .toolbox-block {
+            padding: 5px;
+            margin: 5px 0;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .toolbox-block:hover, .toolbox-block.selected {
+            background-color: #e9f2fd;
+            border-color: #4285f4;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blockly with Simple Keyboard Navigation</h1>
+    
+    <button id="createBlocksBtn">1. Create Sample Blocks</button>
+    <button id="enableKeyboardBtn">2. Enable Keyboard Navigation</button>
+    
+    <div id="status"></div>
+    <div id="currentBlock"></div>
+    
+    <div id="blocklyArea">
+        <div id="blocklyDiv"></div>
+    </div>
+    
+    <!-- Custom Toolbox Panel for Keyboard Navigation -->
+    <div id="toolboxPanel">
+        <h3>Toolbox</h3>
+        <div id="toolboxCategories"></div>
+        <div id="toolboxBlocks" style="display: none;"></div>
+    </div>
+    
+    <div id="instructions">
+        <h2>How to use keyboard navigation:</h2>
+        <ol>
+            <li>Click "Create Sample Blocks" to add blocks to the workspace</li>
+            <li>Click "Enable Keyboard Navigation" to activate keyboard controls</li>
+            <li>Use these keys:
+                <ul>
+                    <li><span class="shortcut">1-6</span> - Select blocks by number</li>
+                    <li><span class="shortcut">↑</span><span class="shortcut">↓</span><span class="shortcut">←</span><span class="shortcut">→</span> - Navigate between blocks</li>
+                    <li><span class="shortcut">T</span> - Open the toolbox</li>
+                    <li><span class="shortcut">C</span> - Enter connection mode (to connect blocks)</li>
+                    <li><span class="shortcut">Tab</span> - Navigate between connection points</li>
+                    <li><span class="shortcut">Enter</span> - Connect blocks at selected connection point</li>
+                    <li><span class="shortcut">Delete</span> - Delete the selected block</li>
+                    <li><span class="shortcut">Escape</span> - Exit current mode / Deselect all blocks</li>
+                </ul>
+            </li>
+            <li>When toolbox is open:
+                <ul>
+                    <li><span class="shortcut">↑</span><span class="shortcut">↓</span> - Navigate between categories or blocks</li>
+                    <li><span class="shortcut">Enter</span> - Open category or add block to workspace</li>
+                    <li><span class="shortcut">←</span> - Go back to categories</li>
+                    <li><span class="shortcut">Escape</span> - Close toolbox</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+    
+    <script>
+        // Initialize Blockly workspace
+        const blocklyArea = document.getElementById('blocklyArea');
+        const blocklyDiv = document.getElementById('blocklyDiv');
+        const statusDiv = document.getElementById('status');
+        const currentBlockDiv = document.getElementById('currentBlock');
+        const toolboxPanel = document.getElementById('toolboxPanel');
+        const toolboxCategories = document.getElementById('toolboxCategories');
+        const toolboxBlocks = document.getElementById('toolboxBlocks');
+        
+        // Define toolbox structure
+        const toolboxDef = {
+            'Logic': [
+                { type: 'controls_if', name: 'If Block' },
+                { type: 'logic_compare', name: 'Compare' },
+                { type: 'logic_boolean', name: 'Boolean' }
+            ],
+            'Loops': [
+                { type: 'controls_repeat_ext', name: 'Repeat' },
+                { type: 'controls_whileUntil', name: 'While/Until' }
+            ],
+            'Math': [
+                { type: 'math_number', name: 'Number' },
+                { type: 'math_arithmetic', name: 'Arithmetic' }
+            ],
+            'Text': [
+                { type: 'text', name: 'Text' },
+                { type: 'text_print', name: 'Print' }
+            ]
+        };
+        
+        // Create the toolbox XML
+        const toolboxXml = `
+            <xml>
+                <category name="Logic" colour="210">
+                    <block type="controls_if"></block>
+                    <block type="logic_compare"></block>
+                    <block type="logic_boolean"></block>
+                </category>
+                <category name="Loops" colour="120">
+                    <block type="controls_repeat_ext"></block>
+                    <block type="controls_whileUntil"></block>
+                </category>
+                <category name="Math" colour="230">
+                    <block type="math_number"></block>
+                    <block type="math_arithmetic"></block>
+                </category>
+                <category name="Text" colour="160">
+                    <block type="text"></block>
+                    <block type="text_print"></block>
+                </category>
+            </xml>
+        `;
+        
+        const workspace = Blockly.inject(blocklyDiv, {
+            toolbox: toolboxXml,
+            zoom: {
+                controls: true,
+                wheel: true,
+                startScale: 1.0,
+                maxScale: 3,
+                minScale: 0.3,
+                scaleSpeed: 1.2
+            },
+            grid: {
+                spacing: 20,
+                length: 3,
+                colour: '#ccc',
+                snap: true
+            },
+            trashcan: true
+        });
+        
+        // Set up event listeners for the workspace to track blocks
+        workspace.addChangeListener(function(event) {
+            // When blocks are created by dragging from toolbox
+            if (event.type === Blockly.Events.BLOCK_CREATE) {
+                // Add newly created blocks to our blockList
+                event.ids.forEach(id => {
+                    const block = workspace.getBlockById(id);
+                    if (block && !blockList.includes(block)) {
+                        blockList.push(block);
+                    }
+                });
+                updateBlockNumbers();
+            }
+            
+            // When blocks are deleted
+            if (event.type === Blockly.Events.BLOCK_DELETE) {
+                // Remove deleted blocks from our blockList
+                blockList = blockList.filter(block => {
+                    return workspace.getBlockById(block.id) !== null;
+                });
+                updateBlockNumbers();
+            }
+            
+            // When blocks are connected or disconnected
+            if (event.type === Blockly.Events.BLOCK_MOVE) {
+                if (event.newParentId !== undefined || event.oldParentId !== undefined) {
+                    // This is a connection/disconnection event
+                    updateBlockNumbers();
+                }
+            }
+        });
+        
+        // Array to store created blocks
+        let blockList = [];
+        
+        // Current selected block index
+        let selectedBlockIndex = -1;
+        
+        // Toolbox state
+        let isToolboxOpen = false;
+        let inCategoryView = true;
+        let categoryList = Object.keys(toolboxDef);
+        let selectedCategoryIndex = 0;
+        let selectedBlockInCategoryIndex = 0;
+        let currentCategoryBlocks = [];
+        
+        // Connection mode state
+        let isConnectionMode = false;
+        let connectionPoints = [];
+        let selectedConnectionIndex = -1;
+        let sourceBlock = null;
+        let sourceConnection = null;
+        
+        // Block numbering system
+        let blockChains = new Map(); // Map to track block chains for numbering
+        
+        // Status display function
+        function showStatus(message, duration = 5000) {
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            // Hide after specified duration
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, duration);
+        }
+        
+        // Update current block display
+        function updateCurrentBlock() {
+            if (isConnectionMode && selectedConnectionIndex >= 0 && connectionPoints.length > 0) {
+                const connection = connectionPoints[selectedConnectionIndex];
+                currentBlockDiv.textContent = `Connection Mode: Selected ${connection.type} connection on ${connection.block.type}`;
+                currentBlockDiv.style.display = 'block';
+            } else if (isToolboxOpen) {
+                if (!inCategoryView && selectedBlockInCategoryIndex >= 0) {
+                    const blockInfo = currentCategoryBlocks[selectedBlockInCategoryIndex];
+                    currentBlockDiv.textContent = `Selected in Toolbox: ${blockInfo.name}`;
+                    currentBlockDiv.style.display = 'block';
+                } else if (selectedCategoryIndex >= 0) {
+                    const category = categoryList[selectedCategoryIndex];
+                    currentBlockDiv.textContent = `Selected Category: ${category}`;
+                    currentBlockDiv.style.display = 'block';
+                } else {
+                    currentBlockDiv.style.display = 'none';
+                }
+            } else if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                const block = blockList[selectedBlockIndex];
+                currentBlockDiv.textContent = `Selected Block ${selectedBlockIndex + 1}: ${block.type}`;
+                currentBlockDiv.style.display = 'block';
+            } else {
+                currentBlockDiv.style.display = 'none';
+            }
+        }
+        
+        // Select a block by index
+        function selectBlock(index) {
+            // Deselect previous block
+            if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                blockList[selectedBlockIndex].unselect();
+            }
+            
+            // Select new block
+            if (index >= 0 && index < blockList.length) {
+                selectedBlockIndex = index;
+                blockList[selectedBlockIndex].select();
+                
+                // Center the viewport on the selected block
+                workspace.centerOnBlock(blockList[selectedBlockIndex].id);
+                
+                updateCurrentBlock();
+                showStatus(`Selected block ${index + 1}: ${blockList[index].type}`);
+            }
+        }
+        
+        // Build the custom toolbox UI
+        function buildToolboxUI() {
+            // Clear existing content
+            toolboxCategories.innerHTML = '';
+            
+            // Add categories
+            categoryList.forEach((category, index) => {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'toolbox-category';
+                categoryDiv.textContent = category;
+                categoryDiv.dataset.index = index;
+                
+                if (index === selectedCategoryIndex) {
+                    categoryDiv.classList.add('selected');
+                }
+                
+                categoryDiv.addEventListener('click', () => {
+                    selectCategory(index);
+                });
+                
+                toolboxCategories.appendChild(categoryDiv);
+            });
+        }
+        
+        // Build the blocks UI for a category
+        function buildBlocksUI(categoryName) {
+            // Clear existing content
+            toolboxBlocks.innerHTML = '';
+            
+            // Get blocks for this category
+            currentCategoryBlocks = toolboxDef[categoryName];
+            
+            // Add blocks
+            currentCategoryBlocks.forEach((block, index) => {
+                const blockDiv = document.createElement('div');
+                blockDiv.className = 'toolbox-block';
+                blockDiv.textContent = block.name;
+                blockDiv.dataset.index = index;
+                
+                if (index === selectedBlockInCategoryIndex) {
+                    blockDiv.classList.add('selected');
+                }
+                
+                blockDiv.addEventListener('click', () => {
+                    addBlockToWorkspace(block.type);
+                });
+                
+                toolboxBlocks.appendChild(blockDiv);
+            });
+        }
+        
+        // Open toolbox for keyboard navigation
+        function openToolbox() {
+            isToolboxOpen = true;
+            inCategoryView = true;
+            selectedCategoryIndex = 0;
+            selectedBlockInCategoryIndex = 0;
+            
+            // Build the toolbox UI
+            buildToolboxUI();
+            
+            // Show the toolbox panel
+            toolboxPanel.style.display = 'block';
+            toolboxCategories.style.display = 'block';
+            toolboxBlocks.style.display = 'none';
+            
+            updateCurrentBlock();
+            showStatus(`Toolbox opened. Use arrow keys to navigate, Enter to select.`);
+        }
+        
+        // Close toolbox and return to workspace
+        function closeToolbox() {
+            isToolboxOpen = false;
+            toolboxPanel.style.display = 'none';
+            updateCurrentBlock();
+            showStatus(`Toolbox closed.`);
+        }
+        
+        // Select a category
+        function selectCategory(index) {
+            // Update selected category
+            const categories = toolboxCategories.querySelectorAll('.toolbox-category');
+            categories.forEach(cat => cat.classList.remove('selected'));
+            
+            selectedCategoryIndex = index;
+            categories[index].classList.add('selected');
+            
+            updateCurrentBlock();
+        }
+        
+        // Open the selected category
+        function openCategory() {
+            if (selectedCategoryIndex >= 0) {
+                const categoryName = categoryList[selectedCategoryIndex];
+                
+                // Switch to blocks view
+                inCategoryView = false;
+                selectedBlockInCategoryIndex = 0;
+                
+                // Build the blocks UI
+                buildBlocksUI(categoryName);
+                
+                // Show blocks, hide categories
+                toolboxCategories.style.display = 'none';
+                toolboxBlocks.style.display = 'block';
+                
+                updateCurrentBlock();
+                showStatus(`Category '${categoryName}' opened. Use arrow keys to navigate blocks.`);
+            }
+        }
+        
+        // Go back to category view
+        function backToCategories() {
+            inCategoryView = true;
+            toolboxCategories.style.display = 'block';
+            toolboxBlocks.style.display = 'none';
+            updateCurrentBlock();
+            showStatus(`Returned to category list.`);
+        }
+        
+        // Add a block to the workspace
+        function addBlockToWorkspace(blockType) {
+            // Create the block
+            const block = workspace.newBlock(blockType);
+            block.initSvg();
+            block.render();
+            
+            // Position it in the center of the visible workspace
+            const metrics = workspace.getMetrics();
+            const x = metrics.viewWidth / 2 + metrics.viewLeft;
+            const y = metrics.viewHeight / 2 + metrics.viewTop;
+            block.moveBy(x, y);
+            
+            // Add to our block list
+            blockList.push(block);
+            
+            showStatus(`Added block: ${blockType}`);
+            
+            // Update block numbers
+            updateBlockNumbers();
+            
+            // Close the toolbox and select the new block
+            closeToolbox();
+            selectBlock(blockList.length - 1);
+        }
+        
+        // Create sample blocks
+        document.getElementById('createBlocksBtn').addEventListener('click', function() {
+            // Clear existing blocks
+            workspace.clear();
+            blockList = [];
+            selectedBlockIndex = -1;
+            
+            // Create blocks with different types and positions
+            const blockData = [
+                {type: 'controls_if', x: 50, y: 50, label: "1. IF Block"},
+                {type: 'math_number', x: 50, y: 150, fields: {NUM: 123}, label: "2. Number Block"},
+                {type: 'logic_compare', x: 200, y: 50, label: "3. Compare Block"},
+                {type: 'controls_repeat_ext', x: 200, y: 150, label: "4. Repeat Block"},
+                {type: 'text', x: 350, y: 50, fields: {TEXT: 'Hello World'}, label: "5. Text Block"},
+                {type: 'logic_boolean', x: 350, y: 150, fields: {BOOL: 'TRUE'}, label: "6. Boolean Block"}
+            ];
+            
+            // Add blocks to workspace
+            blockData.forEach((data, index) => {
+                const block = workspace.newBlock(data.type);
+                block.setMovable(true);
+                block.moveBy(data.x, data.y);
+                block.initSvg();
+                block.render();
+                
+                // Add a comment with the block number for easy identification
+                block.setCommentText(data.label);
+                
+                // Set field values if specified
+                if (data.fields) {
+                    for (const fieldName in data.fields) {
+                        if (block.getField(fieldName)) {
+                            block.setFieldValue(data.fields[fieldName], fieldName);
+                        }
+                    }
+                }
+                
+                // Add to our block list
+                blockList.push(block);
+            });
+            
+            // Update block numbers for all blocks
+            updateBlockNumbers();
+            
+            showStatus('Sample blocks created! Now click "Enable Keyboard Navigation"');
+        });
+        
+        // Enable keyboard navigation
+        document.getElementById('enableKeyboardBtn').addEventListener('click', function() {
+            // Check if blocks exist
+            if (blockList.length === 0) {
+                showStatus('Please create blocks first by clicking "Create Sample Blocks"');
+                return;
+            }
+            
+            // Select the first block to start
+            selectBlock(0);
+            
+            // Add keyboard event listener
+            document.removeEventListener('keydown', handleKeyDown);
+            document.addEventListener('keydown', handleKeyDown);
+            
+            showStatus('Keyboard navigation enabled! Use number keys 1-6 to select blocks, arrow keys to navigate, T for toolbox.', 8000);
+        });
+        
+        // Handle keyboard events
+        function handleKeyDown(e) {
+            // Handle connection mode if active
+            if (isConnectionMode) {
+                handleConnectionNavigation(e);
+                return;
+            }
+            
+            // Handle toolbox navigation if toolbox is open
+            if (isToolboxOpen) {
+                handleToolboxNavigation(e);
+                return;
+            }
+            
+            // Number keys 1-6 select blocks directly
+            if (e.key >= '1' && e.key <= '6') {
+                const index = parseInt(e.key) - 1;
+                if (index < blockList.length) {
+                    selectBlock(index);
+                    e.preventDefault();
+                }
+                return;
+            }
+            
+            // T key opens the toolbox
+            if (e.key === 't' || e.key === 'T') {
+                openToolbox();
+                e.preventDefault();
+                return;
+            }
+            
+            // C key enters connection mode
+            if (e.key === 'c' || e.key === 'C') {
+                if (selectedBlockIndex >= 0) {
+                    enterConnectionMode();
+                    e.preventDefault();
+                } else {
+                    showStatus('Please select a block first before entering connection mode');
+                }
+                return;
+            }
+            
+            // Only proceed with other keys if a block is selected
+            if (selectedBlockIndex < 0) return;
+            
+            switch (e.key) {
+                case 'ArrowLeft':
+                    // Find the nearest block to the left
+                    navigateDirection('left');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowRight':
+                    // Find the nearest block to the right
+                    navigateDirection('right');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowUp':
+                    // Find the nearest block above
+                    navigateDirection('up');
+                    e.preventDefault();
+                    break;
+                    
+                case 'ArrowDown':
+                    // Find the nearest block below
+                    navigateDirection('down');
+                    e.preventDefault();
+                    break;
+                    
+                case 'Delete':
+                case 'Backspace':
+                    // Delete the selected block
+                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                        const blockToDelete = blockList[selectedBlockIndex];
+                        
+                        // Remove from our list
+                        blockList.splice(selectedBlockIndex, 1);
+                        
+                        // If we deleted the last block, select the new last block
+                        if (selectedBlockIndex >= blockList.length) {
+                            selectedBlockIndex = blockList.length - 1;
+                        }
+                        
+                        // Delete the block
+                        blockToDelete.dispose();
+                        
+                        // Select the next block if available
+                        if (blockList.length > 0) {
+                            selectBlock(selectedBlockIndex);
+                        } else {
+                            selectedBlockIndex = -1;
+                            updateCurrentBlock();
+                        }
+                        
+                        // Update block numbers after deletion
+                        updateBlockNumbers();
+                        
+                        showStatus('Block deleted');
+                        e.preventDefault();
+                    }
+                    break;
+                    
+                case 'Escape':
+                    // Deselect all blocks
+                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
+                        blockList[selectedBlockIndex].unselect();
+                        selectedBlockIndex = -1;
+                        updateCurrentBlock();
+                        showStatus('Navigation mode exited');
+                        e.preventDefault();
+                    }
+                    break;
+            }
+        }
+        
+        // Handle keyboard navigation within the toolbox
+        function handleToolboxNavigation(e) {
+            if (!inCategoryView) {
+                // Navigation within an open category
+                switch (e.key) {
+                    case 'ArrowUp':
+                        // Move to previous block in category
+                        if (selectedBlockInCategoryIndex > 0) {
+                            const blocks = toolboxBlocks.querySelectorAll('.toolbox-block');
+                            blocks[selectedBlockInCategoryIndex].classList.remove('selected');
+                            selectedBlockInCategoryIndex--;
+                            blocks[selectedBlockInCategoryIndex].classList.add('selected');
+                            updateCurrentBlock();
+                        }
+                        e.preventDefault();
+                        break;
+                        
+                    case 'ArrowDown':
+                        // Move to next block in category
+                        if (selectedBlockInCategoryIndex < currentCategoryBlocks.length - 1) {
+                            const blocks = toolboxBlocks.querySelectorAll('.toolbox-block');
+                            blocks[selectedBlockInCategoryIndex].classList.remove('selected');
+                            selectedBlockInCategoryIndex++;
+                            blocks[selectedBlockInCategoryIndex].classList.add('selected');
+                            updateCurrentBlock();
+                        }
+                        e.preventDefault();
+                        break;
+                        
+                    case 'ArrowLeft':
+                        // Go back to category list
+                        backToCategories();
+                        e.preventDefault();
+                        break;
+                        
+                    case 'Enter':
+                    case ' ':
+                        // Add the selected block to the workspace
+                        if (selectedBlockInCategoryIndex >= 0) {
+                            const blockType = currentCategoryBlocks[selectedBlockInCategoryIndex].type;
+                            addBlockToWorkspace(blockType);
+                        }
+                        e.preventDefault();
+                        break;
+                        
+                    case 'Escape':
+                        // Go back to category list or close toolbox
+                        backToCategories();
+                        e.preventDefault();
+                        break;
+                }
+            } else {
+                // Navigation between categories
+                switch (e.key) {
+                    case 'ArrowUp':
+                        // Move to previous category
+                        if (selectedCategoryIndex > 0) {
+                            selectCategory(selectedCategoryIndex - 1);
+                        }
+                        e.preventDefault();
+                        break;
+                        
+                    case 'ArrowDown':
+                        // Move to next category
+                        if (selectedCategoryIndex < categoryList.length - 1) {
+                            selectCategory(selectedCategoryIndex + 1);
+                        }
+                        e.preventDefault();
+                        break;
+                        
+                    case 'ArrowRight':
+                    case 'Enter':
+                    case ' ':
+                        // Open the selected category
+                        openCategory();
+                        e.preventDefault();
+                        break;
+                        
+                    case 'Escape':
+                        // Close toolbox and return to workspace
+                        closeToolbox();
+                        e.preventDefault();
+                        break;
+                }
+            }
+        }
+        
+        // Enter connection mode for the selected block
+        function enterConnectionMode() {
+            if (selectedBlockIndex < 0 || selectedBlockIndex >= blockList.length) {
+                showStatus('No block selected');
+                return;
+            }
+            
+            isConnectionMode = true;
+            sourceBlock = blockList[selectedBlockIndex];
+            connectionPoints = [];
+            selectedConnectionIndex = -1;
+            
+            // Get all connections from the block
+            // First, get input connections
+            const inputList = sourceBlock.inputList || [];
+            inputList.forEach(input => {
+                if (input.connection) {
+                    connectionPoints.push({
+                        connection: input.connection,
+                        type: 'input',
+                        block: sourceBlock
+                    });
+                }
+            });
+            
+            // Get output connection if it exists
+            if (sourceBlock.outputConnection) {
+                connectionPoints.push({
+                    connection: sourceBlock.outputConnection,
+                    type: 'output',
+                    block: sourceBlock
+                });
+            }
+            
+            // Get previous connection if it exists
+            if (sourceBlock.previousConnection) {
+                connectionPoints.push({
+                    connection: sourceBlock.previousConnection,
+                    type: 'previous',
+                    block: sourceBlock
+                });
+            }
+            
+            // Get next connection if it exists
+            if (sourceBlock.nextConnection) {
+                connectionPoints.push({
+                    connection: sourceBlock.nextConnection,
+                    type: 'next',
+                    block: sourceBlock
+                });
+            }
+            
+            if (connectionPoints.length > 0) {
+                selectedConnectionIndex = 0;
+                sourceConnection = connectionPoints[selectedConnectionIndex].connection;
+                
+                // Highlight the selected connection (this is a simplified version)
+                // In a real implementation, you would visually highlight the connection
+                
+                updateCurrentBlock();
+                showStatus(`Connection mode: Use Tab to navigate connections, Enter to select, then select target block`);
+            } else {
+                isConnectionMode = false;
+                showStatus('This block has no available connections');
+            }
+        }
+        
+        // Handle keyboard navigation in connection mode
+        function handleConnectionNavigation(e) {
+            switch (e.key) {
+                case 'Tab':
+                    // Navigate to the next connection point
+                    if (connectionPoints.length > 0) {
+                        selectedConnectionIndex = (selectedConnectionIndex + 1) % connectionPoints.length;
+                        sourceConnection = connectionPoints[selectedConnectionIndex].connection;
+                        updateCurrentBlock();
+                        showStatus(`Selected ${connectionPoints[selectedConnectionIndex].type} connection`);
+                    }
+                    e.preventDefault();
+                    break;
+                    
+                case 'Enter':
+                    // If we have a source connection selected, now we need to select a target block
+                    if (sourceConnection) {
+                        // Store the source connection and exit connection mode
+                        const savedSourceConnection = sourceConnection;
+                        const savedSourceBlock = sourceBlock;
+                        
+                        // Exit connection mode but keep the block selected
+                        isConnectionMode = false;
+                        sourceConnection = null;
+                        connectionPoints = [];
+                        selectedConnectionIndex = -1;
+                        
+                        showStatus('Now select a target block to connect to');
+                        
+                        // Set up a one-time event handler for the next block selection
+                        const originalSelectBlock = selectBlock;
+                        selectBlock = function(index) {
+                            // Call the original function
+                            originalSelectBlock(index);
+                            
+                            // Get the target block
+                            const targetBlock = blockList[index];
+                            
+                            // Try to connect the blocks
+                            tryConnectBlocks(savedSourceBlock, savedSourceConnection, targetBlock);
+                            
+                            // Restore the original selectBlock function
+                            selectBlock = originalSelectBlock;
+                        };
+                    }
+                    e.preventDefault();
+                    break;
+                    
+                case 'Escape':
+                    // Exit connection mode
+                    isConnectionMode = false;
+                    sourceConnection = null;
+                    connectionPoints = [];
+                    selectedConnectionIndex = -1;
+                    updateCurrentBlock();
+                    showStatus('Connection mode exited');
+                    e.preventDefault();
+                    break;
+            }
+        }
+        
+        // Try to connect two blocks
+        function tryConnectBlocks(sourceBlock, sourceConnection, targetBlock) {
+            if (!sourceBlock || !sourceConnection || !targetBlock) {
+                showStatus('Invalid blocks or connection');
+                return false;
+            }
+            
+            let success = false;
+            
+            // Check for a compatible connection on the target block
+            const targetConnections = targetBlock.getConnections_(false);
+            
+            for (const targetConnection of targetConnections) {
+                if (sourceConnection.checkType_(targetConnection)) {
+                    // Found a compatible connection!
+                    sourceConnection.connect(targetConnection);
+                    success = true;
+                    
+                    // Update block numbers after connection
+                    updateBlockNumbers();
+                    
+                    showStatus(`Connected ${sourceBlock.type} to ${targetBlock.type}`);
+                    break;
+                }
+            }
+            
+            if (!success) {
+                showStatus('Could not find a compatible connection', 3000);
+            }
+            
+            return success;
+        }
+        
+        // Navigate in a specific direction
+        function navigateDirection(direction) {
+            if (selectedBlockIndex < 0 || blockList.length <= 1) return;
+            
+            const currentBlock = blockList[selectedBlockIndex];
+            const currentPos = currentBlock.getRelativeToSurfaceXY();
+            
+            let bestBlockIndex = -1;
+            let bestDistance = Infinity;
+            
+            // Find the closest block in the specified direction
+            blockList.forEach((block, index) => {
+                if (index === selectedBlockIndex) return;
+                
+                const blockPos = block.getRelativeToSurfaceXY();
+                let isInDirection = false;
+                
+                // Check if the block is in the specified direction
+                switch (direction) {
+                    case 'left':
+                        isInDirection = blockPos.x < currentPos.x;
+                        break;
+                    case 'right':
+                        isInDirection = blockPos.x > currentPos.x;
+                        break;
+                    case 'up':
+                        isInDirection = blockPos.y < currentPos.y;
+                        break;
+                    case 'down':
+                        isInDirection = blockPos.y > currentPos.y;
+                        break;
+                }
+                
+                if (isInDirection) {
+                    // Calculate distance (Manhattan distance)
+                    const distance = Math.abs(blockPos.x - currentPos.x) + Math.abs(blockPos.y - currentPos.y);
+                    
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestBlockIndex = index;
+                    }
+                }
+            });
+            
+            // Select the best block if found
+            if (bestBlockIndex >= 0) {
+                selectBlock(bestBlockIndex);
+            } else {
+                showStatus(`No block found in that direction`);
+            }
+        }
+        
+        // Add and update block numbers
+        function updateBlockNumbers() {
+            // Clear existing block chain tracking
+            blockChains.clear();
+            
+            // Find all top-level blocks (blocks without previous connections or parent)
+            const topLevelBlocks = [];
+            
+            // First pass - identify top-level blocks and add them to our tracking
+            blockList.forEach(block => {
+                // Remove any existing labels
+                removeBlockLabel(block);
+                
+                // A block is top-level if it has no parent OR if it's the top of a stack
+                // (meaning it doesn't have a connected previous connection)
+                const isTopOfStack = !block.previousConnection || 
+                                    (block.previousConnection && !block.previousConnection.isConnected());
+                
+                if (isTopOfStack) {
+                    topLevelBlocks.push(block);
+                }
+            });
+            
+            // Second pass - for each top block, traverse down the chain and number sequentially
+            topLevelBlocks.forEach(topBlock => {
+                let currentBlock = topBlock;
+                let blockNumber = 1;
+                
+                // Follow the chain through connections and number each block
+                while (currentBlock) {
+                    // Add number label to current block
+                    addBlockLabel(currentBlock, blockNumber);
+                    blockChains.set(currentBlock.id, blockNumber);
+                    
+                    // Try to find the next block in the chain
+                    let nextBlock = null;
+                    
+                    // Check if this block has a next connection that's connected
+                    if (currentBlock.nextConnection && currentBlock.nextConnection.isConnected()) {
+                        nextBlock = currentBlock.nextConnection.targetBlock();
+                    } 
+                    // If no next connection, look at output connection (for value blocks)
+                    else if (currentBlock.outputConnection && currentBlock.outputConnection.isConnected()) {
+                        // For output connections, we don't want to follow to parent block
+                        // but rather to any child blocks of this block through inputs
+                        const parentBlock = currentBlock.outputConnection.targetBlock();
+                        // We don't count the parent in the chain
+                    }
+                    
+                    // If we found a next block in the chain, increment number and continue
+                    if (nextBlock) {
+                        blockNumber++;
+                        currentBlock = nextBlock;
+                    } else {
+                        // Look for blocks that are connected to this one via inputs
+                        const connectedBlocks = currentBlock.getChildren(false);
+                        
+                        // Filter out blocks that are connected via next/previous 
+                        // (those are handled by the main chain traversal)
+                        const inputConnectedBlock = connectedBlocks.find(child => {
+                            // Not connected via previous connection
+                            return !child.previousConnection || 
+                                   !child.previousConnection.isConnected() ||
+                                   child.previousConnection.targetBlock() !== currentBlock;
+                        });
+                        
+                        if (inputConnectedBlock) {
+                            blockNumber++;
+                            currentBlock = inputConnectedBlock;
+                        } else {
+                            // End of chain, no more connected blocks
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Add a number label to a block
+        function addBlockLabel(block, number) {
+            // Remove any existing label
+            removeBlockLabel(block);
+            
+            // Create new label element
+            const labelGroup = Blockly.utils.dom.createSvgElement('g', {
+                'class': 'blocklyBlockNumberLabel',
+                'transform': 'translate(8, 8)'
+            }, block.getSvgRoot());
+            
+            // Circle background
+            Blockly.utils.dom.createSvgElement('circle', {
+                'cx': 8,
+                'cy': 8,
+                'r': 10,
+                'fill': '#fff',
+                'stroke': '#000',
+                'stroke-width': 1,
+                'filter': 'url(#blocklyDropShadowFilter)'
+            }, labelGroup);
+            
+            // Number text
+            const text = Blockly.utils.dom.createSvgElement('text', {
+                'x': 8,
+                'y': 12,
+                'text-anchor': 'middle',
+                'dominant-baseline': 'middle',
+                'font-size': '11pt',
+                'font-weight': 'bold',
+                'fill': '#000'
+            }, labelGroup);
+            
+            text.textContent = number;
+            
+            // Store a reference to the label element on the block
+            block.blockNumberLabel = labelGroup;
+        }
+        
+        // Remove number label from a block
+        function removeBlockLabel(block) {
+            if (block.blockNumberLabel) {
+                Blockly.utils.dom.removeNode(block.blockNumberLabel);
+                block.blockNumberLabel = null;
+            }
+        }
+        
+        // Make Blockly responsive
+        function onResize() {
+            // Compute the absolute coordinates and dimensions of blocklyArea.
+            let element = blocklyArea;
+            let x = 0;
+            let y = 0;
+            do {
+                x += element.offsetLeft;
+                y += element.offsetTop;
+                element = element.offsetParent;
+            } while (element);
+            
+            // Position blocklyDiv over blocklyArea.
+            blocklyDiv.style.left = x + 'px';
+            blocklyDiv.style.top = y + 'px';
+            blocklyDiv.style.width = blocklyArea.offsetWidth + 'px';
+            blocklyDiv.style.height = blocklyArea.offsetHeight + 'px';
+            Blockly.svgResize(workspace);
+        }
+        
+        window.addEventListener('resize', onResize, false);
+        onResize();
+    </script>
+</body>
+</html>
