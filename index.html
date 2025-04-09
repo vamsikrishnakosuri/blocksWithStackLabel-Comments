@@ -102,6 +102,91 @@
             background-color: #e9f2fd;
             border-color: #4285f4;
         }
+        
+        /* Block number label styles */
+        .blockNumberLabel {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            background-color: #4285F4;
+            color: white;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 10px;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        /* Stack counter label styles */
+        .stackCounterLabel {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background-color: #EA4335;
+            color: white;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 10px;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        /* Stack name label styles */
+        .stackNameLabel {
+            position: absolute;
+            top: 2px;
+            left: 20px;
+            background-color: #34A853;
+            color: white;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 10px;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        /* Search panel styles */
+        #searchPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        #searchInput {
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 14px;
+            width: 100px;
+        }
+        
+        #searchButton {
+            padding: 5px 10px;
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        #searchButton:hover {
+            background-color: #2b6bc5;
+        }
+        
+        #searchStatus {
+            font-size: 12px;
+            color: #555;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -150,6 +235,16 @@
                 </ul>
             </li>
         </ol>
+    </div>
+    
+    <!-- Add search panel -->
+    <div id="searchPanel">
+        <h3 style="margin: 0 0 5px 0; font-size: 14px;">Go to Block</h3>
+        <div style="display: flex; gap: 5px;">
+            <input type="text" id="searchInput" placeholder="eg: A2, B5" />
+            <button id="searchButton">Go</button>
+        </div>
+        <div id="searchStatus"></div>
     </div>
     
     <script>
@@ -210,6 +305,9 @@
         let workspaceReference;
         let blockList = [];
         let blockChains = new Map();
+        let stackNames = new Map();
+        let nextStackLetter = 0;
+        let stackAssignmentCounter = 0;
         let selectedBlockIndex = -1;
         let isToolboxOpen = false;
         let inCategoryView = true;
@@ -222,6 +320,7 @@
         let selectedConnectionIndex = -1;
         let sourceBlock = null;
         let sourceConnection = null;
+        let updateTimeout = null; // Timeout for batching updates
         
         // Status display function
         function showStatus(message, duration = 5000) {
@@ -503,6 +602,16 @@
             // Handle toolbox navigation if toolbox is open
             if (isToolboxOpen) {
                 handleToolboxNavigation(e);
+                return;
+            }
+            
+            // Skip if the focus is on the search input field
+            if (document.activeElement && 
+                (document.activeElement.id === 'searchInput' || 
+                 document.activeElement.tagName === 'INPUT' || 
+                 document.activeElement.tagName === 'TEXTAREA' || 
+                 document.activeElement.tagName === 'SELECT')) {
+                // Allow normal typing in input fields
                 return;
             }
             
@@ -911,9 +1020,21 @@
         // Add and update block numbers
         function updateBlockNumbers() {
             console.log("updateBlockNumbers called, blocks in workspace:", blockList.length);
+            stackAssignmentCounter++;
+            console.log("Update iteration #", stackAssignmentCounter);
             
             // Clear existing block chain tracking
             blockChains.clear();
+            
+            // DO NOT clear stackNames here - we need to preserve them
+            // Just clean up entries for blocks that no longer exist
+            for (const blockId of stackNames.keys()) {
+                const block = workspace.getBlockById(blockId);
+                if (!block) {
+                    console.log(`Removing name for non-existent block ${blockId}`);
+                    stackNames.delete(blockId);
+                }
+            }
             
             // Ensure the blockList is up to date with the current workspace
             blockList = workspace.getAllBlocks();
@@ -923,37 +1044,60 @@
             blockList.forEach(block => {
                 removeBlockLabel(block);
                 removeStackCounterLabel(block);
+                removeStackNameLabel(block);
             });
             
-            // Find all top-level blocks (blocks without previous connections or parent)
-            const topLevelBlocks = [];
+            // First, identify all TRULY independent blocks (not connected to anything)
+            const independentRootBlocks = blockList.filter(block => {
+                // A block is truly independent if it has no parent and no connected previous connection
+                return !block.getParent() && 
+                       (!block.previousConnection || !block.previousConnection.isConnected()) &&
+                       (!block.outputConnection || !block.outputConnection.isConnected());
+            });
             
-            // First pass - identify top-level blocks and add them to our tracking
-            blockList.forEach(block => {
-                // A block is top-level if it has no parent OR if it's the top of a stack
-                // (meaning it doesn't have a connected previous connection)
-                const isTopOfStack = !block.previousConnection || 
-                                    (block.previousConnection && !block.previousConnection.isConnected());
-                
-                if (isTopOfStack) {
-                    topLevelBlocks.push(block);
+            console.log("Found", independentRootBlocks.length, "truly independent root blocks");
+            
+            // Get snapshot of current stack names before assignment for comparison
+            const stackNamesBefore = new Map(stackNames);
+            
+            // Assign stack names (A, B, C, etc.) to each independent root block
+            assignStackNames(independentRootBlocks);
+            
+            // Verify all previously named blocks still have their names
+            for (const [blockId, name] of stackNamesBefore.entries()) {
+                const block = workspace.getBlockById(blockId);
+                // If the block still exists and is still an independent root block
+                if (block && independentRootBlocks.includes(block)) {
+                    // Make sure it still has the same name
+                    if (!stackNames.has(blockId) || stackNames.get(blockId) !== name) {
+                        console.error(`Block ${blockId} lost its name (was ${name}, now ${stackNames.get(blockId) || 'missing'})`);
+                        // Restore its name
+                        stackNames.set(blockId, name);
+                    }
                 }
-            });
+            }
             
-            console.log("Top level blocks found:", topLevelBlocks.length);
-            
-            // Second pass - for each top block, traverse down the chain and number sequentially
-            topLevelBlocks.forEach(topBlock => {
-                // First count all blocks in this stack
-                const stackBlocks = countBlocksInStack(topBlock);
+            // Process each independent root block and its entire chain
+            independentRootBlocks.forEach(rootBlock => {
+                // Get all blocks in this stack (including nested blocks)
+                const stackBlocks = getAllBlocksInStack(rootBlock);
                 const stackCount = stackBlocks.length;
                 
-                console.log(`Stack with block ${topBlock.id} has ${stackCount} blocks`);
+                console.log(`Stack with root block ${rootBlock.id} has ${stackCount} blocks (including nested)`);
                 
-                // Add the stack counter to the top block with the total count
-                addStackCounterLabel(topBlock, stackCount);
+                // Add the stack counter to the root block with the total count
+                addStackCounterLabel(rootBlock, stackCount);
                 
-                // Now number each block in the stack sequentially
+                // Add stack name to the root block
+                const stackName = stackNames.get(rootBlock.id);
+                if (stackName) {
+                    addStackNameLabel(rootBlock, stackName);
+                    console.log(`Applied stack name ${stackName} to block ${rootBlock.id}`);
+                } else {
+                    console.error(`No stack name found for block ${rootBlock.id}`);
+                }
+                
+                // Number all blocks in this stack sequentially (including nested)
                 let blockNumber = 1;
                 stackBlocks.forEach(block => {
                     addBlockLabel(block, blockNumber);
@@ -963,39 +1107,37 @@
             });
         }
         
-        // Helper function to count all blocks in a stack
-        function countBlocksInStack(topBlock) {
+        // Get all blocks in a stack, including all nested blocks
+        function getAllBlocksInStack(rootBlock) {
             const stackBlocks = [];
-            let currentBlock = topBlock;
             
-            // Traverse the stack and collect all blocks
-            while (currentBlock) {
-                stackBlocks.push(currentBlock);
+            // Function to recursively add a block and all its descendants
+            function addBlockAndDescendants(block) {
+                // Add this block
+                stackBlocks.push(block);
                 
-                // Find next block in the chain
-                let nextBlock = null;
-                
-                // Check if this block has a next connection that's connected
-                if (currentBlock.nextConnection && currentBlock.nextConnection.isConnected()) {
-                    nextBlock = currentBlock.nextConnection.targetBlock();
-                } else {
-                    // Look for blocks that are connected to this one via inputs
-                    const connectedBlocks = currentBlock.getChildren(false);
-                    
-                    // Filter out blocks that are connected via next/previous
-                    const inputConnectedBlock = connectedBlocks.find(child => {
-                        return !child.previousConnection || 
-                               !child.previousConnection.isConnected() ||
-                               child.previousConnection.targetBlock() !== currentBlock;
-                    });
-                    
-                    if (inputConnectedBlock) {
-                        nextBlock = inputConnectedBlock;
-                    }
+                // Add all blocks connected to its next connection (blocks below it)
+                let nextBlock = block.getNextBlock();
+                if (nextBlock) {
+                    addBlockAndDescendants(nextBlock);
                 }
                 
-                currentBlock = nextBlock;
+                // Add all blocks inside this block's inputs (nested blocks)
+                const childBlocks = block.getChildren(false);
+                for (const childBlock of childBlocks) {
+                    // Skip blocks that are connected to the next connection
+                    // (we already handled those above)
+                    if (block.getNextBlock() === childBlock) {
+                        continue;
+                    }
+                    
+                    // Add this child block and all its descendants
+                    addBlockAndDescendants(childBlock);
+                }
             }
+            
+            // Start with the root block
+            addBlockAndDescendants(rootBlock);
             
             return stackBlocks;
         }
@@ -1121,6 +1263,54 @@
             }
         }
         
+        // Add stack name label (A, B, C, etc.) to the top block
+        function addStackNameLabel(block, name) {
+            // Remove any existing stack name label
+            removeStackNameLabel(block);
+            
+            console.log(`Adding stack name to block ${block.id} with name: ${name}`);
+            
+            try {
+                // Create new stack name element - position it at the top left of the block
+                const nameGroup = Blockly.utils.dom.createSvgElement('g', {
+                    'class': 'blocklyStackNameLabel',
+                    'transform': 'translate(10, -45)'  // Position above the block on the left
+                }, block.getSvgRoot());
+                
+                // Background with rounded corners
+                Blockly.utils.dom.createSvgElement('circle', {
+                    'cx': 18,
+                    'cy': 18,
+                    'r': 18,
+                    'fill': '#4285f4',  // Google blue
+                    'stroke': '#2a56c6', // Darker blue border
+                    'stroke-width': 2.5,
+                    'filter': 'drop-shadow(2px 2px 3px rgba(0,0,0,0.3))'
+                }, nameGroup);
+                
+                // Stack name text
+                const text = Blockly.utils.dom.createSvgElement('text', {
+                    'x': 18,
+                    'y': 23,
+                    'text-anchor': 'middle',
+                    'dominant-baseline': 'middle',
+                    'font-size': '18pt',
+                    'font-weight': 'bold',
+                    'fill': '#ffffff',  // White text
+                    'style': 'text-shadow: 1px 1px 2px rgba(0,0,0,0.3)'  // Text shadow
+                }, nameGroup);
+                
+                text.textContent = name;
+                
+                // Store a reference to the name element on the block
+                block.stackNameLabel = nameGroup;
+                
+                console.log("Stack name added successfully");
+            } catch (e) {
+                console.error("Error adding stack name:", e);
+            }
+        }
+        
         // Remove number label from a block
         function removeBlockLabel(block) {
             if (block.blockNumberLabel) {
@@ -1134,6 +1324,150 @@
             if (block.stackCounterLabel) {
                 Blockly.utils.dom.removeNode(block.stackCounterLabel);
                 block.stackCounterLabel = null;
+            }
+        }
+        
+        // Remove stack name label from a block
+        function removeStackNameLabel(block) {
+            if (block.stackNameLabel) {
+                Blockly.utils.dom.removeNode(block.stackNameLabel);
+                block.stackNameLabel = null;
+            }
+        }
+        
+        // Assign stack names (A, B, C, etc.) to each top-level block
+        function assignStackNames(topLevelBlocks) {
+            console.log("Assigning stack names to", topLevelBlocks.length, "top-level blocks");
+            
+            // First, remove any stack names for blocks that are no longer top-level
+            // or don't exist in the workspace anymore
+            const blocksToKeep = new Set(topLevelBlocks.map(block => block.id));
+            
+            // Check all existing stack names
+            const namesToRemove = [];
+            for (const [blockId, name] of stackNames.entries()) {
+                const block = workspace.getBlockById(blockId);
+                // Remove if block no longer exists or is not a top-level block
+                if (!block || !blocksToKeep.has(blockId)) {
+                    namesToRemove.push(blockId);
+                }
+            }
+            
+            // Remove any names that were identified for removal
+            namesToRemove.forEach(id => {
+                console.log(`Removing name for non-existent block ${id}`);
+                stackNames.delete(id);
+            });
+            
+            // Alphabet for naming stacks
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            
+            // Find blocks that don't have names yet
+            const newBlocks = topLevelBlocks.filter(block => !stackNames.has(block.id));
+            
+            // Get all existing stack names in use
+            const usedNames = new Set(Array.from(stackNames.values()));
+            
+            // Find the next available letter that's not already used
+            // We'll try to fill in gaps in the sequence first
+            let nextAvailableName = '';
+            for (let i = 0; i < alphabet.length; i++) {
+                const candidateName = alphabet[i];
+                if (!usedNames.has(candidateName)) {
+                    nextAvailableName = candidateName;
+                    break;
+                }
+            }
+            
+            // If we've used up all single letters, move to double letters
+            if (!nextAvailableName) {
+                // Find highest single letter index currently used
+                let maxSingleLetterIndex = -1;
+                for (const name of usedNames) {
+                    if (name.length === 1) {
+                        const index = alphabet.indexOf(name);
+                        maxSingleLetterIndex = Math.max(maxSingleLetterIndex, index);
+                    }
+                }
+                
+                // Move to double letters starting from AA
+                const firstLetterIndex = 0;
+                const secondLetterIndex = 0;
+                nextAvailableName = alphabet[firstLetterIndex] + alphabet[secondLetterIndex];
+            }
+            
+            // Assign names to new blocks
+            if (newBlocks.length > 0) {
+                console.log(`Found ${newBlocks.length} new top-level blocks needing names`);
+                console.log(`Next available name: ${nextAvailableName}`);
+                
+                // Sort blocks by position for consistent naming
+                newBlocks.sort((a, b) => {
+                    const aPos = a.getRelativeToSurfaceXY();
+                    const bPos = b.getRelativeToSurfaceXY();
+                    return aPos.x - bPos.x;
+                });
+                
+                // Assign names to each new block
+                newBlocks.forEach(block => {
+                    // Find the next available name that's not used
+                    while (usedNames.has(nextAvailableName)) {
+                        // Move to the next letter
+                        const lastCharIndex = nextAvailableName.length - 1;
+                        const lastChar = nextAvailableName[lastCharIndex];
+                        const lastCharAlphabetIndex = alphabet.indexOf(lastChar);
+                        
+                        if (lastCharAlphabetIndex < alphabet.length - 1) {
+                            // Just increment the last character
+                            nextAvailableName = nextAvailableName.substring(0, lastCharIndex) + 
+                                              alphabet[lastCharAlphabetIndex + 1];
+                        } else {
+                            // Need to carry over to the next sequence
+                            if (nextAvailableName.length === 1) {
+                                // Move from Z to AA
+                                nextAvailableName = 'AA';
+                            } else {
+                                // Increment the first character and reset the second
+                                const firstChar = nextAvailableName[0];
+                                const firstCharIndex = alphabet.indexOf(firstChar);
+                                nextAvailableName = alphabet[firstCharIndex + 1] + 'A';
+                            }
+                        }
+                    }
+                    
+                    // Assign the name
+                    stackNames.set(block.id, nextAvailableName);
+                    usedNames.add(nextAvailableName);
+                    console.log(`Assigned stack name ${nextAvailableName} to block ${block.id}`);
+                    
+                    // Move to the next name for the next block
+                    if (nextAvailableName.length === 1) {
+                        const index = alphabet.indexOf(nextAvailableName);
+                        if (index < alphabet.length - 1) {
+                            nextAvailableName = alphabet[index + 1];
+                        } else {
+                            nextAvailableName = 'AA';
+                        }
+                    } else {
+                        // Increment double letter name
+                        const lastChar = nextAvailableName[nextAvailableName.length - 1];
+                        const lastCharIndex = alphabet.indexOf(lastChar);
+                        if (lastCharIndex < alphabet.length - 1) {
+                            nextAvailableName = nextAvailableName.substring(0, nextAvailableName.length - 1) + 
+                                              alphabet[lastCharIndex + 1];
+                        } else {
+                            const firstChar = nextAvailableName[0];
+                            const firstCharIndex = alphabet.indexOf(firstChar);
+                            nextAvailableName = alphabet[firstCharIndex + 1] + 'A';
+                        }
+                    }
+                });
+            }
+            
+            // Debug the final state
+            console.log("Stack names after assignment:");
+            for (const [blockId, name] of stackNames.entries()) {
+                console.log(`Block ${blockId}: Stack ${name}`);
             }
         }
         
@@ -1189,7 +1523,7 @@
         
         // Set up event listeners for the Blockly workspace
         function setupEventListeners() {
-            // Listen for workspace events
+            // Listen for workspace changes
             workspace.addChangeListener(function(event) {
                 // When blocks are created
                 if (event.type === Blockly.Events.BLOCK_CREATE) {
@@ -1204,17 +1538,29 @@
                             }
                         });
                     }
-                    updateBlockNumbers();
+                    
+                    // Only trigger a full update after a short delay to allow multiple blocks
+                    // to be created at once (e.g., when loading a workspace)
+                    clearTimeout(updateTimeout);
+                    updateTimeout = setTimeout(updateBlockNumbers, 50);
                 }
                 // When blocks are deleted
                 else if (event.type === Blockly.Events.BLOCK_DELETE) {
                     console.log('Block deleted:', event.ids);
                     
+                    // Remove deleted blocks from stackNames map
+                    if (event.ids) {
+                        event.ids.forEach(id => {
+                            stackNames.delete(id);
+                        });
+                    }
+                    
                     // Update our block list to match workspace reality
                     blockList = workspace.getAllBlocks();
                     
                     // Force refresh with a delay to ensure workspace is updated
-                    setTimeout(function() {
+                    clearTimeout(updateTimeout);
+                    updateTimeout = setTimeout(function() {
                         // Double check our block list
                         blockList = workspace.getAllBlocks();
                         console.log(`After deletion: ${blockList.length} blocks remain in workspace`);
@@ -1230,138 +1576,171 @@
                         console.log('Block connected or disconnected');
                         
                         // Update with delay to allow connection to complete
-                        setTimeout(function() {
-                            updateBlockNumbers();
-                        }, 50);
+                        clearTimeout(updateTimeout);
+                        updateTimeout = setTimeout(updateBlockNumbers, 50);
                     }
                 }
                 // When blocks are changed (field edit, etc)
                 else if (event.type === Blockly.Events.BLOCK_CHANGE) {
-                    updateBlockNumbers();
+                    clearTimeout(updateTimeout);
+                    updateTimeout = setTimeout(updateBlockNumbers, 50);
                 }
             });
             
             // Set up keyboard navigation event listener
-            document.addEventListener('keydown', handleKeyboardNavigation);
-        }
-        
-        // Handle keyboard navigation
-        function handleKeyboardNavigation(e) {
-            // Handle connection mode if active
-            if (isConnectionMode) {
-                handleConnectionNavigation(e);
-                return;
-            }
-            
-            // Handle toolbox navigation if toolbox is open
-            if (isToolboxOpen) {
-                handleToolboxNavigation(e);
-                return;
-            }
-            
-            // Number keys 1-6 select blocks directly
-            if (e.key >= '1' && e.key <= '6') {
-                const index = parseInt(e.key) - 1;
-                if (index < blockList.length) {
-                    selectBlock(index);
-                    e.preventDefault();
+            document.addEventListener('keydown', function(e) {
+                // Skip keyboard navigation if focus is on the search input
+                if (document.activeElement && 
+                    (document.activeElement.id === 'searchInput' || 
+                     document.activeElement.tagName === 'INPUT' || 
+                     document.activeElement.tagName === 'TEXTAREA' || 
+                     document.activeElement.tagName === 'SELECT')) {
+                    return; // Let the default input behavior happen
                 }
-                return;
-            }
-            
-            // T key opens the toolbox
-            if (e.key === 't' || e.key === 'T') {
-                openToolbox();
-                e.preventDefault();
-                return;
-            }
-            
-            // C key enters connection mode
-            if (e.key === 'c' || e.key === 'C') {
-                if (selectedBlockIndex >= 0) {
-                    enterConnectionMode();
-                    e.preventDefault();
-                } else {
-                    showStatus('Please select a block first before entering connection mode');
-                }
-                return;
-            }
-            
-            // Only proceed with other keys if a block is selected
-            if (selectedBlockIndex < 0) return;
-            
-            switch (e.key) {
-                case 'ArrowLeft':
-                    // Find the nearest block to the left
-                    navigateDirection('left');
-                    e.preventDefault();
-                    break;
-                    
-                case 'ArrowRight':
-                    // Find the nearest block to the right
-                    navigateDirection('right');
-                    e.preventDefault();
-                    break;
-                    
-                case 'ArrowUp':
-                    // Find the nearest block above
-                    navigateDirection('up');
-                    e.preventDefault();
-                    break;
-                    
-                case 'ArrowDown':
-                    // Find the nearest block below
-                    navigateDirection('down');
-                    e.preventDefault();
-                    break;
-                    
-                case 'Delete':
-                case 'Backspace':
-                    // Delete the selected block
-                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
-                        const blockToDelete = blockList[selectedBlockIndex];
-                        
-                        // Remove from our list
-                        blockList.splice(selectedBlockIndex, 1);
-                        
-                        // If we deleted the last block, select the new last block
-                        if (selectedBlockIndex >= blockList.length) {
-                            selectedBlockIndex = blockList.length - 1;
-                        }
-                        
-                        // Delete the block
-                        blockToDelete.dispose();
-                        
-                        // Select the next block if available
-                        if (blockList.length > 0) {
-                            selectBlock(selectedBlockIndex);
-                        } else {
-                            selectedBlockIndex = -1;
-                            updateCurrentBlock();
-                        }
-                        
-                        // Update block numbers after deletion
-                        updateBlockNumbers();
-                        
-                        showStatus('Block deleted');
-                        e.preventDefault();
-                    }
-                    break;
-                    
-                case 'Escape':
-                    // Deselect all blocks
-                    if (selectedBlockIndex >= 0 && selectedBlockIndex < blockList.length) {
-                        blockList[selectedBlockIndex].unselect();
-                        selectedBlockIndex = -1;
-                        updateCurrentBlock();
-                        showStatus('Navigation mode exited');
-                        e.preventDefault();
-                    }
-                    break;
-            }
+                
+                // Otherwise, handle keyboard navigation
+                handleKeyboardNavigation(e);
+            });
         }
         
         initBlockly();
+        
+        // Initialize search panel
+        function setupSearchPanel() {
+            const searchButton = document.getElementById('searchButton');
+            const searchInput = document.getElementById('searchInput');
+            const searchStatus = document.getElementById('searchStatus');
+            
+            // Focus handler to stop propagation of keyboard events
+            searchInput.addEventListener('focus', function() {
+                // When the search field is focused, ensure the events aren't propagated
+                searchInput.style.backgroundColor = '#f0f8ff'; // Light blue to indicate focus
+            });
+            
+            searchInput.addEventListener('blur', function() {
+                // Reset styling when focus is lost
+                searchInput.style.backgroundColor = '';
+            });
+            
+            // Handle search button click
+            searchButton.addEventListener('click', function() {
+                performSearch();
+            });
+            
+            // Handle Enter key in search input
+            searchInput.addEventListener('keydown', function(e) {
+                // Stop event propagation to prevent interference with block navigation
+                e.stopPropagation();
+                
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+            
+            // Also stop keyup events
+            searchInput.addEventListener('keyup', function(e) {
+                e.stopPropagation();
+            });
+            
+            // Also stop keypress events
+            searchInput.addEventListener('keypress', function(e) {
+                e.stopPropagation();
+            });
+            
+            // Perform the search
+            function performSearch() {
+                const searchTerm = searchInput.value.trim().toUpperCase();
+                
+                // Reset status
+                searchStatus.textContent = '';
+                
+                // Parse the search term (format: stack name + block number, e.g., "A2")
+                if (!searchTerm) {
+                    searchStatus.textContent = 'Please enter a search term.';
+                    return;
+                }
+                
+                // Match pattern: one or more letters followed by one or more numbers
+                const regex = /^([A-Z]+)(\d+)$/;
+                const match = searchTerm.match(regex);
+                
+                if (!match) {
+                    searchStatus.textContent = 'Invalid format. Use "A2" or "B3".';
+                    return;
+                }
+                
+                const stackName = match[1];
+                const blockNumber = parseInt(match[2]);
+                
+                // Find the block with the matching stack name and block number
+                let foundBlock = null;
+                
+                // First, find the stack
+                let stackBlock = null;
+                for (const [blockId, name] of stackNames.entries()) {
+                    if (name === stackName) {
+                        stackBlock = workspace.getBlockById(blockId);
+                        break;
+                    }
+                }
+                
+                if (!stackBlock) {
+                    searchStatus.textContent = `Stack ${stackName} not found.`;
+                    return;
+                }
+                
+                // Now find the specific block with the requested number in this stack
+                const stackBlocks = getAllBlocksInStack(stackBlock);
+                if (blockNumber <= 0 || blockNumber > stackBlocks.length) {
+                    searchStatus.textContent = `Block ${blockNumber} not found in stack ${stackName}.`;
+                    return;
+                }
+                
+                // Block numbers are 1-indexed in the UI
+                foundBlock = stackBlocks[blockNumber - 1];
+                
+                if (foundBlock) {
+                    // Highlight and scroll to the found block
+                    highlightBlock(foundBlock);
+                    searchStatus.textContent = `Found block ${stackName}${blockNumber}.`;
+                } else {
+                    searchStatus.textContent = `Block ${stackName}${blockNumber} not found.`;
+                }
+            }
+            
+            // Function to highlight a block and scroll to it
+            function highlightBlock(block) {
+                // Clear any existing highlight
+                workspace.highlightBlock(null);
+                
+                // Highlight the found block
+                workspace.highlightBlock(block.id);
+                
+                // Center on the block
+                const metrics = workspace.getMetrics();
+                const blockPos = block.getRelativeToSurfaceXY();
+                const blockSize = block.getHeightWidth();
+                
+                // Calculate the center point of the block
+                const blockCenterX = blockPos.x + blockSize.width / 2;
+                const blockCenterY = blockPos.y + blockSize.height / 2;
+                
+                // Center the workspace on the block
+                workspace.scroll(
+                    blockCenterX - metrics.viewWidth / 2,
+                    blockCenterY - metrics.viewHeight / 2
+                );
+                
+                // Optional: add a temporary visual effect to make it easier to spot
+                const blockSvg = block.getSvgRoot();
+                blockSvg.classList.add('blocklyHighlighted');
+                setTimeout(() => {
+                    blockSvg.classList.remove('blocklyHighlighted');
+                }, 2000);
+            }
+        }
+        
+        setupSearchPanel();
     </script>
 </body>
 </html>
