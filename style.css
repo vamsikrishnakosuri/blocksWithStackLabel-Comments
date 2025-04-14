@@ -1,0 +1,181 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+#blocklyArea {
+    height: 480px;
+    width: 100%;
+    background-color: #f9f9f9;
+    position: relative;
+}
+#blocklyDiv {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+button {
+    padding: 10px 15px;
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin: 10px 0;
+    font-size: 16px;
+}
+button:hover {
+    background-color: #3b78e7;
+}
+#instructions {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f0f0f0;
+    border-left: 4px solid #4285f4;
+}
+#status {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #e8f0fe;
+    display: none;
+}
+.shortcut {
+    display: inline-block;
+    background-color: #eee;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 2px 5px;
+    margin: 2px;
+    font-family: monospace;
+}
+#currentBlock {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #d9edf7;
+    border-left: 4px solid #31708f;
+    display: none;
+}
+#toolboxPanel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 250px;
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    padding: 10px;
+    display: none;
+    z-index: 1000;
+}
+#toolboxPanel h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+.toolbox-category {
+    padding: 5px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+.toolbox-category:hover, .toolbox-category.selected {
+    background-color: #f0f0f0;
+}
+.toolbox-block {
+    padding: 5px;
+    margin: 5px 0;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.toolbox-block:hover, .toolbox-block.selected {
+    background-color: #e9f2fd;
+    border-color: #4285f4;
+}
+
+/* Block number label styles */
+.blockNumberLabel {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    background-color: #4285F4;
+    color: white;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* Stack counter label styles */
+.stackCounterLabel {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background-color: #EA4335;
+    color: white;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* Stack name label styles */
+.stackNameLabel {
+    position: absolute;
+    top: 2px;
+    left: 20px;
+    background-color: #34A853;
+    color: white;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* Search panel styles */
+#searchPanel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: white;
+    padding: 10px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+#searchInput {
+    padding: 5px 10px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 14px;
+    width: 100px;
+}
+
+#searchButton {
+    padding: 5px 10px;
+    background-color: #4285F4;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#searchButton:hover {
+    background-color: #2b6bc5;
+}
+
+#searchStatus {
+    font-size: 12px;
+    color: #555;
+    margin-top: 5px;
+}
