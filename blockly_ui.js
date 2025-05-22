@@ -1047,9 +1047,37 @@ function handleKeyDown(e) {
                         }
                     }
                     
-                    // Format the identifier as "<StackName><BlockNumber>. <BlockType>"
-                    blockIdentifier = (stackName || '') + blockNumber + ". " + 
-                                      (block.type || '').replace(/_/g, ' ');
+                    // Get a simplified block type name
+                    let simplifiedBlockType = '';
+                    if (block.type) {
+                        // Extract a simplified name from the block type
+                        const typeStr = block.type.toLowerCase();
+                        
+                        if (typeStr.includes('if')) {
+                            simplifiedBlockType = 'if block';
+                        } else if (typeStr.includes('repeat') || typeStr.includes('loop')) {
+                            simplifiedBlockType = 'repeat block';
+                        } else if (typeStr.includes('var')) {
+                            simplifiedBlockType = 'variable';
+                        } else if (typeStr.includes('math')) {
+                            simplifiedBlockType = 'math block';
+                        } else if (typeStr.includes('logic')) {
+                            simplifiedBlockType = 'logic block';
+                        } else if (typeStr.includes('text')) {
+                            simplifiedBlockType = 'text block';
+                        } else if (typeStr.includes('list')) {
+                            simplifiedBlockType = 'list block';
+                        } else if (typeStr.includes('procedure')) {
+                            simplifiedBlockType = 'function block';
+                        } else {
+                            // Get the last part of the block type as a fallback
+                            const parts = block.type.split('_');
+                            simplifiedBlockType = parts[parts.length - 1] + ' block';
+                        }
+                    }
+                    
+                    // Format the identifier as "<StackName><BlockNumber>. <SimplifiedBlockType>"
+                    blockIdentifier = (stackName || '') + blockNumber + ". " + simplifiedBlockType;
                     
                     // Get existing comment or tag from the block's data
                     let userComment = '';
@@ -1104,12 +1132,12 @@ function handleKeyDown(e) {
                             <em>Start with # for a tag, otherwise it's a comment</em>
                         </div>
                         <form onsubmit="return false;" style="width: 100%;"> <!-- Wrap in form with submit prevention -->
-                            <div style="display: flex; width: 100%;">                           
-                                <div id="block-identifier" style="background: #e9e9e9; padding: 6px 8px; border: 1px solid #ddd; border-right: none; border-radius: 4px 0 0 4px; font-weight: bold; color: #333; white-space: nowrap;">
+                            <div style="display: flex; width: 100%; position: relative;">                           
+                                <div id="block-identifier" style="background: #e9e9e9; padding: 6px 8px; border: 1px solid #ddd; border-right: none; border-radius: 4px 0 0 4px; font-weight: bold; color: #333; white-space: nowrap; max-width: 35%; overflow: hidden; text-overflow: ellipsis;">
                                     ${blockIdentifier}
                                 </div>
                                 <textarea id="custom-comment-textarea" 
-                                          style="flex-grow: 1; height: 30px; border: 1px solid #ddd; background: white; resize: none; outline: none; padding: 5px; border-radius: 0 4px 4px 0;">${userComment}</textarea>
+                                          style="flex-grow: 1; min-width: 150px; height: 30px; border: 1px solid #ddd; background: white; resize: none; outline: none; padding: 5px; border-radius: 0 4px 4px 0;">${userComment}</textarea>
                             </div>
                             <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
                                 <button id="save-comment-btn" type="button" style="margin-right: 5px; padding: 5px 10px; background: #4d90fe; color: white; border: none; border-radius: 3px; cursor: pointer;">Save</button>
