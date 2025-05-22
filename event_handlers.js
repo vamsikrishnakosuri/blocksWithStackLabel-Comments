@@ -65,19 +65,27 @@ function setupEventListeners() {
     });
     
     // Set up keyboard navigation event listener
-    document.addEventListener('keydown', function(e) {
-        // Skip keyboard navigation if focus is on the search input
-        if (document.activeElement && 
-            (document.activeElement.id === 'searchInput' || 
-             document.activeElement.tagName === 'INPUT' || 
-             document.activeElement.tagName === 'TEXTAREA' || 
-             document.activeElement.tagName === 'SELECT')) {
-            return; // Let the default input behavior happen
-        }
-        
-        // Otherwise, handle keyboard navigation
-        handleKeyboardNavigation(e);
-    });
+    // document.addEventListener('keydown', function(e) {
+    //     // Skip keyboard navigation if focus is on the search input
+    //     if (document.activeElement && 
+    //         (document.activeElement.id === 'searchInput' || 
+    //          document.activeElement.tagName === 'INPUT' || 
+    //          document.activeElement.tagName === 'TEXTAREA' || 
+    //          document.activeElement.tagName === 'SELECT')) {
+    //         return; // Let the default input behavior happen
+    //     }
+    // 
+    //     // If Ctrl, Alt, or Meta key is pressed, let other global handlers (like in blockly_ui.js) manage it.
+    //     // This prevents this listener from interfering with shortcuts like Ctrl+C.
+    //     if (e.ctrlKey || e.altKey || e.metaKey) {
+    //         // Exception: Allow Ctrl+F for browser find, etc. if not handled elsewhere.
+    //         // For now, we assume blockly_ui.js's handleKeyDown will take precedence for app-specific Ctrl shortcuts.
+    //         return;
+    //     }
+    //     
+    //     // Otherwise, handle keyboard navigation (presumably for non-modified keys like arrows)
+    //     // handleKeyboardNavigation(e); // This was causing a ReferenceError
+    // });
 }
 
 // Initialize search panel
